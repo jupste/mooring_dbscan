@@ -21,7 +21,7 @@ def preprocess_data(df):
     df.loc[:,'weekday'] = df.Date.apply(lambda x: x.weekday())
     # Filter out points that are outside port area 
     ports = gpd.read_file(cfg.PORT_FILE)
-    port_point = ports[ports.PORT_NAME=='RADE DE BREST'].geometry.values[0]
+    port_point = ports[ports.PORT_NAME==cfg.PORT_NAME].geometry.values[0]
     # Create circle buffer from port point
     distance = cfg.INCLUSION_ZONE
     circle_buffer = port_point.buffer(distance)
@@ -39,13 +39,15 @@ def preprocess_data(df):
     df.loc[:,'calculated_speed'] = df.dist_m/df.dt
     # Drop values where speed is significant and nav status 5
     df.drop(df[(df.calculated_speed>1) & (df.navigationalstatus==5)].index, inplace=True)
-
+    '''
     vessel_types = cfg.VESSEL_TYPES
     df_filtered = pd.DataFrame()
     # Include selected vesseltypes
     for num_tuple in vessel_types:
         df_filtered = pd.concat([df_filtered, df[(df.vessel_type_num>=num_tuple[0]) & (df.vessel_type_num<=num_tuple[1])]])
-    return df_filtered
+    
+    '''
+    return df#_filtered
 
 def include_static_data(df):
     # include dimensions
@@ -55,19 +57,21 @@ def include_static_data(df):
     
 
     # include shiptype
-    
-    types = static.groupby('sourcemmsi').shiptype.describe()
-    lengths = static.groupby('sourcemmsi').length.describe()
-    beams = static.groupby('sourcemmsi').beam.describe()
-    drafts = static.groupby('sourcemmsi').draft.describe()
+    ships = static.groupby('sourcemmsi')
+    types = ships.shiptype.describe()
+    lengths = ships.length.describe()
+    beams = ships.beam.describe()
+    drafts = ships.draught.describe()
 
-    shiptype_dict = dict(zip(stats.index, stats['50%'].replace(0, np.nan).values))
-    def get_vessel_type(x):
-        try:
-            return shiptype_dict[x]
-        except:
-            return np.nan
-    df['vessel_type_num'] = df.sourcemmsi.apply(lambda x: get_vessel_type(x))
+    shiptype_dict = dict(zip(types.index, types['50%'].replace(0, np.nan).values))
+    length_dict = dict(zip(lengths.index, lengths['50%'].replace(0, np.nan).values))
+    beam_dict = dict(zip(beams.index, beams['50%'].replace(0, np.nan).values))
+    draft_dict = dict(zip(drafts.index, drafts['50%'].replace(0, np.nan).values))
+    df['vessel_type_num'] = df.sourcemmsi.apply(lambda x: shiptype_dict[x] if x in shiptype_dict.keys() else np.nan)
+    df['length'] = df.sourcemmsi.apply(lambda x: length_dict[x] if x in length_dict.keys() else np.nan)
+    df['beam'] = df.sourcemmsi.apply(lambda x: beam_dict[x] if x in beam_dict.keys() else np.nan)
+    df['draft'] = df.sourcemmsi.apply(lambda x: draft_dict[x] if x in draft_dict.keys() else np.nan)
+
     return df
 
 def calculate_centers(df):
@@ -92,36 +96,47 @@ def make_polygons(clusters):
     clusters.sort_values(by=['cluster'], ascending=[True], inplace=True)
     clusters.reset_index(drop=True, inplace=True)
     clusters['geometry'] = [geometry.Point(xy) for xy in zip(clusters['lon'], clusters['lat'])]
-    anchs_clusters = pd.DataFrame()
-    anchs_clusters_gdf = gpd.GeoDataFrame()
+    poly_clusters = gpd.GeoDataFrame()
     gb = clusters.groupby('cluster')
     for y in gb.groups:
         df0 = gb.get_group(y).copy()
         point_collection = geometry.MultiPoint(list(df0['geometry']))
         # point_collection.envelope
         convex_hull_polygon = point_collection.convex_hull
-        anchs_clusters = anchs_clusters.append(pd.DataFrame(data={'anchorage_id':[y],'geometry':[convex_hull_polygon]}))
-        anchs_clusters_gdf = anchs_clusters_gdf.append(gpd.GeoDataFrame({'anchorage_id':[y],'geometry':[convex_hull_polygon]}))
-    anchs_clusters.reset_index(inplace=True)
-    anchs_clusters_gdf.reset_index(inplace=True)
-    anchs_clusters_gdf.crs = 'epsg:4326'
-    return anchs_clusters_gdf
+        poly_clusters = poly_clusters.append(pd.DataFrame(data={'anchorage_id':[y],'geometry':[convex_hull_polygon]}))
+    poly_clusters.reset_index(inplace=True)
+    #poly_clusters.geometry = gpd.GeoSeries.from_wkt(poly_clusters['geometry'])
+    poly_clusters.crs = 'epsg:4326'
+    return poly_clusters
 
 def validate_polygons(polygons):
     validation_data = cfg.VALIDATION_DATA
-
+    print(polygons)
+    polygons.geometry = polygons.geometry.buffer(0.0005)
+    for poly in polygons.geometry:
+        intersect = False
+        for line in validation_data.geometry:
+            if poly.intersects(line):
+                intersect= True
+        assert intersect
 
 def enrich_ais_data():
     pass
 
 if __name__ == "__main__":
+    print('[Stage 1 - Load/preprocess data] Preprocessing Input AIS...')
     df = pd.read_csv(cfg.AIS_CSV_IN)
+    df = df[df[' SHIPTYPE'] == 'CONTAINER SHIP']
+    df.rename(columns={' LON':'lon', ' LAT':'lat', 'MMSI':'sourcemmsi', ' TIMESTAMP_UTC': 't', ' STATUS': 'navigationalstatus'}, inplace=True)
+    df.t = pd.to_datetime(df.t)
+    df.t = df.t.astype('int')/(10**9)
+    print('loading geodf...')
     df = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon, df.lat), crs='epsg:4326')
 
-    print('[Stage 1 - Load/preprocess data] Preprocessing Input AIS...')
-    
+    print('preprocessing...')
+    #df = include_static_data(df)
     df = preprocess_data(df)
-    df = include_static_data(df)
+    
     print(df)
     print('[Stage 2 - Data Clustering] Clustering with DBSCAN...')
 
@@ -130,7 +145,10 @@ if __name__ == "__main__":
     print('[Stage 3 - Cluster polygon creation] Create Polygons from Convex Hulls of DBSCAN Clusters...')
 
     polygons = make_polygons(clusters)
+    #validate_polygons(polygons)
     polygons.to_csv(cfg.POLYGON_CSV_OUT)
+
+
     '''
     print('convex'); anchs_clusters, anchs_clusters_gdf = fun_convex_hull(df)
 

@@ -2,10 +2,10 @@ import os
 
 CFG_BASEPATH = os.path.dirname(__file__)
 CFG_CSV_OUTPUT_DIR = os.path.join(CFG_BASEPATH, 'data')
-AIS_CSV_IN = os.path.join(CFG_CSV_OUTPUT_DIR,'csv', 'test_ais.csv')
+AIS_CSV_IN = os.path.join(CFG_CSV_OUTPUT_DIR,'csv', 'all_ais.csv')
 STATIC_CSV_IN = os.path.join(CFG_CSV_OUTPUT_DIR, 'csv', 'static_data.csv')
 AIS_CSV_OUT = 'dbscan_clusters.csv'
-POLYGON_CSV_OUT = 'cluster_polygons.csv'
+POLYGON_CSV_OUT = 'pireaus_cluster_polygons.csv'
 
 ### DBSCAN PARAMETERS
 MIN_SAMPLES = 3
@@ -16,11 +16,11 @@ MAX_EPS_KM = MAX_EPS_KM/6371.0088
 USE_NAVIGATIONAL_STATUS = True
 USE_MEDIAN_VALUES = True
 PORT_FILE = os.path.join(CFG_CSV_OUTPUT_DIR, 'shape' ,'WPI.shp')
-PORT_NAME = 'RADE DE BREST'
+PORT_NAME = 'PIRAIEVS'
 # Include shiptypes between values
 VESSEL_TYPES = [(70,79)]
 # Inclusion zone in degrees (0.01 degree is about 1.1 km)
-INCLUSION_ZONE = 0.05
+INCLUSION_ZONE = 0.1
 
 ### CLUSTER PARAMETERS
 
