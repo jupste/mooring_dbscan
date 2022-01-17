@@ -17,7 +17,7 @@ USE_NAVIGATIONAL_STATUS = True
 USE_MEDIAN_VALUES = True
 PORT_FILE = os.path.join(CFG_CSV_OUTPUT_DIR, 'shape' ,'WPI.shp')
 PORT_NAME = 'RADE DE BREST'
-# Include shiptypes between values
+# Include shiptypes between values, can have multiple tuples
 VESSEL_TYPES = [(70,79)]
 # Inclusion zone in degrees (0.01 degree is about 1.1 km)
 INCLUSION_ZONE = 0.1
