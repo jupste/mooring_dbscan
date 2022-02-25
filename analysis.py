@@ -1,3 +1,4 @@
+from contextlib import redirect_stderr
 import pandas as pd
 import geopandas as gpd
 from sklearn.cluster import DBSCAN
@@ -9,8 +10,10 @@ from shapely import geometry, wkt
 import matplotlib.pyplot as plt
 import matplotlib.ticker as plticker
 import datetime
+import plotly.express as px
+import pandas as pd
 
-
+# Parallelize with dask
 def add_clusters_to_data(gdf, polygons):
     gdf['cluster'] = -999
     for i, cluster in polygons[1:].iterrows():
@@ -22,6 +25,16 @@ def add_clusters_to_data(gdf, polygons):
         gdf.loc[precise_matches.index, 'cluster'] = cluster.anchorage_id
     return gdf
 
+def ship_visit_gantt_chart(gdf):
+    gdf.sort_values(['sourcemmsi', 't'], inplace=True)
+    stops = df_geo.groupby(['change_in_cluster'])
+    a,b,c  = stops.Date.min(), stops.Date.max(), stops.cluster.max()
+    stops_df = pd.DataFrame().from_dict({'cluster':c, 'date_min':a, 'date_max':b})
+    stops_df['berth_num'] = stops_df.index
+    fig = px.timeline(stops_df[stops_df.cluster>=0], x_start="date_min", x_end="date_max", y="cluster", color='berth_num')
+    fig.write_html(str(cfg.FILE_PREFIX + '_gantt.html'))
+
+# Parallellize?
 def arrival_departing_analysis(gdf):
     gdf.sort_values(['sourcemmsi','t'], inplace=True)
     gdf['enters_cluster'] = gdf.groupby('sourcemmsi').cluster.diff()>0
@@ -36,9 +49,9 @@ def arrival_departing_analysis(gdf):
 
 def draw_hour_plot(hours, title, filename):
     fig, ax = plt.subplots()
-    clusters = [27,28,29, 8, 5, 10]
+    # clusters = [27,28,29, 8, 5, 10]
     hours = hours.rename('count').reset_index()
-    hours = hours[hours['cluster'].isin(clusters)]
+    #hours = hours[hours['cluster'].isin(clusters)]
     loc = plticker.MultipleLocator(base=1.0)
     ax.set_xlim(0,23)
     ax.set_ylim(0,max(hours['count'])+1)
@@ -68,6 +81,14 @@ def ship_dimension_analysis(gdf):
     result_df.max_draft = clusters.draft.quantile(0.99, interpolation='nearest')
     return result_df
 
+def draft_change_analysis(gdf):
+    gdf = gdf[gdf.draft!=0]
+    gdf['draft_change'] = gdf.sort_values(['sourcemmsi','t']).groupby('sourcemmsi').draft.diff()
+    gdf.draft_change.fillna(0, inplace=True)
+    draft_rows = gdf[gdf.draft_change!=0].groupby('cluster')
+    num_draft_change = draft_rows.size()
+    av_draft_change = draft_rows.draft_change.describe()['mean']
+    return num_draft_change, av_draft_change
 
 def ship_duration_analysis(gdf):
     gdf.sort_values(['sourcemmsi','t'], inplace=True)
@@ -76,14 +97,26 @@ def ship_duration_analysis(gdf):
     times = times.apply(lambda x: datetime.timedelta(seconds=x))
     clusters = visits.cluster.describe()['max']
     visits_df = pd.DataFrame().from_dict({'time': times.values, 'cluster': clusters.values})
-    visits_df = visits_df[visits_df.time>datetime.timedelta(minutes=30)]
-    return visits_df.groupby('cluster').time.describe()['50%']
+    visits_df = visits_df[visits_df.time>datetime.timedelta(hours=12)]
+    return visits_df.groupby('cluster').time.mean()
 
 def ship_type_analysis(gdf):
-    gdf.vessel_type_num.fillna(0, inplace=True)
-    ship_percentage = (gdf.groupby('cluster').vessel_type_num.value_counts()/gdf.groupby('cluster').size()*100).drop(index=-999).reset_index(level=[1])
+    ship_percentage = (gdf.groupby('cluster').shiptype.value_counts()/gdf.groupby('cluster').size()*100).drop(index=-999).reset_index(level=[1])
     ship_percentage.rename(columns= {0:'percentage'},inplace=True)
-    return ship_percentage
+    ship_percentage.to_html('ship_types.html')
+
+def analysis_dataframe(gdf):
+    dimensions = ship_dimension_analysis(gdf)
+    duration = ship_duration_analysis(gdf)
+    num_draft_change, av_draft_change = draft_change_analysis(gdf)
+    result_df = pd.DataFrame()
+    result_df['Unique ships'] = gdf.groupby('cluster').sourcemmsi.nunique()
+    result_df['Number of visits'] = gdf.groupby('cluster').change_in_cluster.nunique()
+    result_df[['Max length', 'Max beam', 'Max draft']] = dimensions
+    result_df['Median time in cluster'] =  duration
+    result_df['Number of draft changes'] = num_draft_change
+    result_df['Average draft change'] = av_draft_change
+    result_df.to_html(str(cfg.FILE_PREFIX + '_results.html'))
 
 if __name__ == "__main__":
     df = pd.read_csv('processed_ais.csv')
@@ -95,18 +128,16 @@ if __name__ == "__main__":
     
     polygons = gpd.GeoDataFrame(polygons, crs='epsg:4326')
     polygons.geometry = polygons.geometry.buffer(0.0002)
-    print('[Stage 5 - Adding cluster labels to AIS data] Adding cluster labels...')
+   
     gdf = add_clusters_to_data(gdf, polygons)
     arrival_departing_analysis(gdf)
     dimensions = ship_dimension_analysis(gdf)
-    types = ship_type_analysis(gdf)
+    #types = ship_type_analysis(gdf)
     duration = ship_duration_analysis(gdf)
     result_df = pd.DataFrame()
     result_df['Unique ships'] = gdf.groupby('cluster').sourcemmsi.nunique()
     result_df['Number of visits'] = gdf.groupby('cluster').change_in_cluster.nunique()
     result_df[['Max length', 'Max beam', 'Max draft']] = dimensions
     result_df['Median time in cluster'] =  duration
-    clusters = [1, 27,28,29, 8, 5, 10]
-    result_df = result_df.loc[clusters]
-    types.to_html(str(cfg.FILE_PREFIX + '_types.html'))
+    #types.to_html(str(cfg.FILE_PREFIX + '_types.html'))
     result_df.to_html(str(cfg.FILE_PREFIX + '_results.html'))

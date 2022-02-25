@@ -10,12 +10,10 @@ from shapely import geometry, wkt
 
 def calculate_centers(df):
     df = select_ship_types(df)
-    df['new_berth'] = df.sort_values('t').groupby('sourcemmsi').navigationalstatus.diff()>0
-    df['berth_num'] = df.new_berth.cumsum()
     df.sort_values(['sourcemmsi', 't'], inplace=True)
     berth_visits = df[df.navigationalstatus==5].groupby('berth_num')
-    lon = berth_visits.lon.describe()['50%'].values
-    lat = berth_visits.lat.describe()['50%'].values
+    lon = berth_visits.lon.apply(pd.Series.median).values
+    lat = berth_visits.lat.apply(pd.Series.median).values
     center_coords = list(zip(lat,lon))
     return center_coords
 
