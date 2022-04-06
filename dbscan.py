@@ -36,7 +36,7 @@ def make_polygons(clusters):
         point_collection = geometry.MultiPoint(list(df0['geometry']))
         # point_collection.envelope
         convex_hull_polygon = point_collection.convex_hull
-        poly_clusters = poly_clusters.append(pd.DataFrame(data={'anchorage_id':[y],'geometry':[convex_hull_polygon]}))
+        poly_clusters = poly_clusters.append(pd.DataFrame(data={'cluster_id':[y],'geometry':[convex_hull_polygon]}))
     poly_clusters.reset_index(inplace=True)
     #poly_clusters.geometry = gpd.GeoSeries.from_wkt(poly_clusters['geometry'])
     poly_clusters.crs = 'epsg:4326'
@@ -55,15 +55,10 @@ def validate_polygons(polygons):
         assert intersect
 
 def select_ship_types(df):
-    vessel_types = cfg.VESSEL_TYPES
-    if vessel_types:
-        df_filtered = pd.DataFrame()
-        # Include selected vesseltypes
-        for num_tuple in vessel_types:
-            df_filtered = pd.concat([df_filtered, df[(df.vessel_type_num>=num_tuple[0]) & (df.vessel_type_num<=num_tuple[1])]])
-        return df_filtered
-    else: 
-        return df
+    vessel_types = []
+    for types in cfg.VESSEL_TYPES:
+        vessel_types = vessel_types + (list(range(types[0], types[1]+1)))
+    return df[df.shiptype.isin(vessel_types)]
 
 if __name__ == "__main__":
     df = pd.read_csv('processed_ais.csv')

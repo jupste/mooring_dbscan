@@ -23,13 +23,13 @@ def preprocess_data(df):
         lonrad = np.radians(df['lon'])
         latrad = np.radians(df['lat'])
         dlon = lon_prev - lonrad 
-        dlat = lat_prev - latradpd.read_csv(cfg.AIS_CSV_IN)
+        dlat = lat_prev - latrad
         a = np.sin(dlat/2)**2 + np.cos(latrad) * np.cos(lat_prev) * np.sin(dlon/2)**2
         dist_m = (2 * np.arctan2(np.sqrt(a), np.sqrt(1-a)))*6371000
         return dist_m/dt
     df['speed'] = calculate_speed(df)
     # Drop values where speed is significant and nav status 5
-    df.drop(df[(df.speed>1) & (df.navigational_status=='Moored')].index, inplace=True)
+    df.drop(df[(df.speed>1) & (df.navigationalstatus==5)].index, inplace=True)
     df.reset_index(inplace=True)
     return df
 
@@ -40,11 +40,10 @@ def include_static_data(df):
         'shiptype': 'float32','tobow': 'float32', 'tostern': 'float32', 'tostarboard': 'float32', 'toport': 'float32', 'eta': 'str', 'draught': 'float32',
         'destination': 'str', 'mothershipmmsi': 'str', 't': 'int64'}
     static = pd.read_csv('lib/data/csv/static_data.csv', dtype=dtypes)
-    dfs = []kex
+    dfs = []
     df = df.sort_values('t')
     static = static.sort_values('t')
     intersection = list(set(df.sourcemmsi.unique()) & set(static.sourcemmsi.unique()))
-    complement = list(set(df.sourcemmsi.unique()) - set(static.sourcemmsi.unique()))
     static_groups = static.groupby('sourcemmsi')
     dynamic_groups = df.groupby('sourcemmsi')
     for mmsi in intersection:
@@ -52,24 +51,32 @@ def include_static_data(df):
         b = static_groups.get_group(mmsi)
         c = pd.merge_asof(a, b, on='t', direction='nearest')
         dfs.append(c)
-    for mmsi in complement:
-        dfs.append(dynamic_groups.get_group(mmsi))
     df = pd.concat(dfs)
     df.drop(columns = 'sourcemmsi_y', inplace=True)
     df.rename(columns = {'sourcemmsi_x': 'sourcemmsi'}, inplace = True)
     df.shiptype.fillna(0, inplace=True)
     df['length'] = df.tobow + df.tostern
     df['beam'] = df.tostarboard + df.toport
+    df = df.rename(columns = {'draught':'draft'})
     df.sort_values('t', inplace=True)
-    # Remove columns with more than 80% missing values
+    # Remove columns with m ore than 80% missing values
     limitPer = len(df) * .80
     df = df.dropna(thresh=limitPer, axis=1)
     df = df.drop_duplicates(['sourcemmsi', 't'])
     df = df.sort_values(['sourcemmsi', 't'])
-    df['new_berth'] = df.groupby('sourcemmsi').navigationalstatus.diff()>0
+    df['prev_mmsi'] = df.sourcemmsi.shift()
+    df['new_berth'] = ((df.navigationalstatus.diff()!=0) | (df.sourcemmsi!=df.prev_mmsi))
     df['berth_num'] = df.new_berth.cumsum()
     df.reset_index(inplace=True)
-    return df
+    gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon, df.lat), crs='epsg:4326')
+    ports = gpd.read_file(cfg.PORT_FILE)
+    port_point = ports[ports.PORT_NAME.isin(cfg.PORT_NAME)].geometry.values[0]
+    # Create circle buffer from port points
+    distance = cfg.INCLUSION_ZONE
+    circle_buffer = port_point.buffer(distance)
+    xmin, ymin, xmax, ymax = circle_buffer.envelope.bounds
+    gdf = gdf.cx[xmin:xmax, ymin:ymax]
+    return gdf
     
 if __name__ == "__main__":
     print('[Stage 1 - Load/preprocess data] Preprocessing Input AIS...')

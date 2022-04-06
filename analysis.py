@@ -41,8 +41,8 @@ def arrival_departing_analysis(gdf):
     gdf['leaves_cluster'] = gdf.groupby('sourcemmsi').cluster.diff()<0
     gdf['leaves_cluster'] = gdf.leaves_cluster.shift(-1).fillna(False)
     gdf['change_in_cluster'] = (gdf['enters_cluster'] | gdf['leaves_cluster']).cumsum()
-    arrivals = gdf[gdf.enters_cluster].groupby('cluster').hour.value_counts()
-    departures = gdf[gdf.leaves_cluster].groupby('cluster').hour.value_counts()
+    arrivals = gdf[gdf.enters_cluster].groupby('cluster').hours.value_counts()
+    departures = gdf[gdf.leaves_cluster].groupby('cluster').hours.value_counts()
     draw_hour_plot(arrivals, 'Arrival hours', str(cfg.FILE_PREFIX + '_arrival-plot.png'))
     draw_hour_plot(departures, 'Departure hours', str(cfg.FILE_PREFIX + '_departure-plot.png'))
     return gdf
@@ -60,8 +60,8 @@ def draw_hour_plot(hours, title, filename):
     ax.xaxis.set_major_locator(loc)
     for cluster in hours.cluster.unique():
         data = hours.loc[hours.cluster==cluster]
-        data.sort_values('hour', inplace=True)
-        line, = ax.plot(data.hour.values, data['count'].values)
+        data.sort_values('hours', inplace=True)
+        line, = ax.plot(data.hours.values, data['count'].values)
         line.set_label(str('Cluster ' + str(cluster)))
     ax.set_title(title, size=32)
     
@@ -76,9 +76,9 @@ def draw_hour_plot(hours, title, filename):
 def ship_dimension_analysis(gdf):
     clusters = gdf.groupby('cluster')
     result_df = pd.DataFrame(columns=['max_length', 'max_beam', 'max_draft'])
-    result_df.max_length = clusters.length.quantile(0.99, interpolation='nearest')
-    result_df.max_beam = clusters.beam.quantile(0.99, interpolation='nearest')
-    result_df.max_draft = clusters.draft.quantile(0.99, interpolation='nearest')
+    result_df.max_length = clusters.length.quantile(0.995, interpolation='nearest')
+    result_df.max_beam = clusters.beam.quantile(0.995, interpolation='nearest')
+    result_df.max_draft = clusters.draft.quantile(0.995, interpolation='nearest')
     return result_df
 
 def draft_change_analysis(gdf):
@@ -132,12 +132,12 @@ if __name__ == "__main__":
     gdf = add_clusters_to_data(gdf, polygons)
     arrival_departing_analysis(gdf)
     dimensions = ship_dimension_analysis(gdf)
-    #types = ship_type_analysis(gdf)
+    types = ship_type_analysis(gdf)
     duration = ship_duration_analysis(gdf)
     result_df = pd.DataFrame()
     result_df['Unique ships'] = gdf.groupby('cluster').sourcemmsi.nunique()
     result_df['Number of visits'] = gdf.groupby('cluster').change_in_cluster.nunique()
     result_df[['Max length', 'Max beam', 'Max draft']] = dimensions
     result_df['Median time in cluster'] =  duration
-    #types.to_html(str(cfg.FILE_PREFIX + '_types.html'))
+    types.to_html(str(cfg.FILE_PREFIX + '_types.html'))
     result_df.to_html(str(cfg.FILE_PREFIX + '_results.html'))

@@ -6,6 +6,7 @@ import config as cfg
 from dbscan import dbscan_clusters
 from analysis import add_clusters_to_data, arrival_departing_analysis, analysis_dataframe, ship_type_analysis
 from datetime import datetime
+from shapely import wkt
 import dask.dataframe as dd
 
 
@@ -33,6 +34,8 @@ class mooring_dbscan:
         self.data = data
 
     def set_clusters(self, clusters):
+        clusters = gpd.GeoDataFrame(clusters, crs='epsg:4326')
+        clusters.geometry = clusters.geometry.buffer(0.0003)
         self.clusters = clusters
 
     def make_gdf(self):
@@ -53,6 +56,8 @@ if __name__ == "__main__":
     print('[Time taken]:'+str(interval2-interval1))
     print('[Stage 3 - Data Clustering] Clustering with DBSCAN...')
     moor.set_clusters(dbscan_clusters(moor.data))
+
+    moor.clusters.to_csv(cfg.POLYGON_CSV_OUT)
     interval3 = datetime.now()
     print('[Time taken]:'+str(interval3-interval2))
     print('[Stage 4 - Adding cluster labels to AIS data] Adding cluster labels...')
@@ -60,7 +65,7 @@ if __name__ == "__main__":
     interval4 = datetime.now()
     print('[Time taken]:'+str(interval4-interval3))
     print('[Stage 5 - Analysis of AIS data] Running analysis steps on AIS data...')
-    moor.make_gdf()
+    
     arrival_departing_analysis(moor.data)
     ship_type_analysis(moor.data)
     analysis_dataframe(moor.data)
