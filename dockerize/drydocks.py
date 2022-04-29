@@ -31,6 +31,10 @@ def preprocess_dry_docks(df):
     df.drop_duplicates(['mmsiserial', 'position_timestamp'], inplace=True)
     df.sort_values('position_timestamp', inplace=True)
     df.drop(df[(df.sog>1) & (df.navigational_status=='Moored')].index, inplace=True)
+    # Drop ships with less than 1000 messages
+    mmsis = (df.groupby('mmsiserial').size()>1000)
+    mmsis = mmsis[mmsis==True]
+    df = df[df.MMSI.isin(list(mmsis[mmsis==True].index))]
     gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.longitude, df.latitude), crs ='epsg:4326')
     logging.info('[Made geodataframe]')
     gdf['mmsiserial'] = gdf['mmsiserial'].astype('category')
@@ -71,6 +75,8 @@ def dbscan_clusters(gdf):
     db = DBSCAN(eps=cfg.MAX_EPS_KM, min_samples=cfg.MIN_SAMPLES, algorithm='ball_tree', metric='haversine').fit(np.radians(coords))
     clusters = pd.DataFrame.from_dict({'lat':  [c[0] for c in coords], 'lon':[c[1] for c in coords], 'cluster': db.labels_})
     poly = make_polygons(clusters)
+    polygons = gpd.GeoDataFrame(polygons)
+    polygons.geometry= polygons.geometry.buffer(0.0002)
     logging.info('[Clustering complete]')
     return poly
 
@@ -132,10 +138,14 @@ def add_clusters_to_data(gdf, polygons):
         gdf.loc[precise_matches.index, 'cluster'] = cluster.anchorage_id
     gdf.sort_values(['mmsiserial', 'position_timestamp'], inplace=True)
     logging.info('[Adding clusters to data done]')
-    gdf['enters_cluster'] = (((gdf.cluster.diff() != 0) & (gdf.cluster>-1)) & (gdf.mmsiserial==gdf.prev_mmsi))
+    gdf['enters_cluster'] = (((gdf.cluster.diff() != 0) & (gdf.cluster>-1)) | (gdf.mmsiserial!=gdf.prev_mmsi))
     gdf['leaves_cluster'] = (((gdf.cluster.diff() != 0) & (gdf.cluster==-1)) & (gdf.mmsiserial==gdf.prev_mmsi))
     gdf['leaves_cluster'] = gdf.leaves_cluster.shift(-1).fillna(False)
     gdf['change_in_cluster'] = (gdf['enters_cluster'] | gdf['leaves_cluster']).cumsum()
+    berths = gdf.groupby('change_in_cluster')
+    b = (berths.position_timestamp.max()-berths.position_timestamp.min())>datetime.timedelta(hours=2)
+    visits = list(b[b==True].index)
+    gdf = gdf[gdf.change_in_cluster.isin(visits)]
     logging.info('[Calculated changes in clusters]')
     return gdf
 
@@ -177,6 +187,7 @@ if __name__ == "__main__":
         df = select_ports(df)
     df = preprocess_dry_docks(df)
     polygons = dbscan_clusters(df)
+
     #polygons[1:].apply(lambda x: download_image(x), axis=1)
     df = add_clusters_to_data(df, polygons)
     ship_duration_analysis(df)
